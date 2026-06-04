@@ -12,53 +12,51 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.BufferedReader;
-
 @Slf4j
 @RestController
 @RequestMapping("/api/files")
 @RequiredArgsConstructor
 public class FileController {
 
-    private final FileProcessingService fileProcessingService; // сервис обработки файла
-    private final JobTrackerService jobTrackerService;    // сервис статусов задачи
+    private final FileProcessingService fileProcessingService;
+    private final JobTrackerService jobTrackerService;
 
-
-    // POST /api/files/upload
-    // принимает CSV файл, создаёт задачу в БД, запускает обработку в фоне
-    // сразу возвращает jobId — клиент использует его чтобы проверять прогресс
     @PostMapping("/upload")
     public ResponseEntity<UploadResponse> uploadFile(
             @RequestParam("file") MultipartFile file) {
 
-        // проверяем что файл не пусто
         if (file.isEmpty()) {
             return ResponseEntity.badRequest()
                     .body(new UploadResponse(null, "File is empty"));
         }
-        // считаем количество строк чтобы знать totalLines для прогресса
-        // -1 потому что первая строка — заголовок CSV
-        int totalLines = countLines(file) - 1;
 
+        // копируем файл в байты — чтобы читать только один раз
+        byte[] fileBytes;
+        try {
+            fileBytes = file.getBytes();
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError()
+                    .body(new UploadResponse(null, "Failed to read file"));
+        }
 
-        // создаём задачу в БД со статусом PENDING
-        ProcessingJob processingJob = jobTrackerService.createJob(totalLines);
+        // считаем строки из байтов, -1 за заголовок
+        int totalLines = (int) new String(fileBytes).lines().count() - 1;
 
-        // запускаем обработку асинхронно — этот метод сразу вернёт управление
-        // файл будет обрабатываться в фоне в отдельном потоке
-        fileProcessingService.processFile(file, processingJob.getId());
+        ProcessingJob job = jobTrackerService.createJob(totalLines);
 
         log.info("Processing file {} of {} lines", file.getOriginalFilename(), totalLines);
 
-        // сразу отвечаем клиенту — не ждём пока файл обработается
-        return ResponseEntity.ok(new UploadResponse(processingJob.getId(), "File uploaded successfuly"));
+        // передаём байты а не MultipartFile
+        fileProcessingService.processFile(fileBytes, job.getId());
+
+        return ResponseEntity.ok(new UploadResponse(job.getId(), "File uploaded successfuly"));
     }
 
     @GetMapping("/status/{jobId}")
-    public ResponseEntity<JobStatusResponse>  getStatus(
+    public ResponseEntity<JobStatusResponse> getStatus(
             @PathVariable Long jobId) {
 
-
-        ProcessingJob job = jobTrackerService.findJobId(jobId);
+        ProcessingJob job = jobTrackerService.findJobById(jobId); // исправлено
 
         JobStatusResponse response = new JobStatusResponse(
                 job.getId(),
@@ -67,20 +65,7 @@ public class FileController {
                 job.getProcessedLines()
         );
         return ResponseEntity.ok(response);
-
     }
-
-    private int countLines(MultipartFile file) {
-        try(java.io.BufferedReader reader = new java.io.BufferedReader(
-                new java.io.InputStreamReader(file.getInputStream()))) {
-            return (int) reader.lines().count();
-        } catch (Exception e) {
-            log.error ("Failed to count lines: {}", e.getMessage());
-            return 0;
-        }
-    }
-
-
 }
 
 

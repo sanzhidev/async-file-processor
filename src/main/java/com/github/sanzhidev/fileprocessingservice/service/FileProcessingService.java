@@ -5,17 +5,18 @@ import com.github.sanzhidev.fileprocessingservice.model.UserRecord;
 import com.github.sanzhidev.fileprocessingservice.repository.UserRecordRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
-import org.springframework.web.multipart.MultipartFile;
 
 import java.io.BufferedReader;
+import java.io.ByteArrayInputStream;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicInteger;
-
 
 @Slf4j
 @Service
@@ -25,21 +26,20 @@ public class FileProcessingService {
     private final UserRecordRepository userRecordRepository;
     private final JobTrackerService jobTrackerService;
 
-    @org.springframework.beans.factory.annotation.Qualifier("fileProcessingExecutor")
-    private final java.util.concurrent.Executor executor;
-
+    @Qualifier("fileProcessingExecutor")
+    private final Executor executor;
 
     @Async("fileProcessingExecutor")
-    public CompletableFuture<Void> processFile(MultipartFile file, Long jobId) {
+    public CompletableFuture<Void> processFile(byte[] fileBytes, Long jobId) {
         try {
             log.info("Job id={} started in thread: {}", jobId, Thread.currentThread().getName());
             jobTrackerService.markInProgress(jobId);
 
-            List<String> lines = readLines(file);
+            List<String> lines = readLines(fileBytes);  // передаём fileBytes
             int total = lines.size();
             AtomicInteger processedCount = new AtomicInteger(0);
-            ProcessingJob job = jobTrackerService.findJobId(jobId);
-            List<List<String>> batches = splitIntoBatches(lines, 10);
+            ProcessingJob job = jobTrackerService.findJobById(jobId);  // передаём jobId
+            List<List<String>> batches = splitIntoBatches(lines, 10);  // была пропущена эта строка
 
             List<CompletableFuture<Void>> futures = batches.stream()
                     .map(batch -> CompletableFuture.runAsync(() -> {
@@ -56,33 +56,26 @@ public class FileProcessingService {
                     }, executor))
                     .toList();
 
-
             CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
-            jobTrackerService.markComplete(jobId, processedCount.get());
+            jobTrackerService.markComplete(jobId, processedCount.get());  // было markComplete
 
         } catch (Exception e) {
             log.error("Job id={} failed: {}", jobId, e.getMessage());
             jobTrackerService.markFailed(jobId);
         }
 
-        return CompletableFuture.completedFuture(null);  // возвращаем завершённый future
+        return CompletableFuture.completedFuture(null);
     }
 
-
-    // читает все строки из загруженного файла, пропускает заголовок (первую строку)
-    private List<String> readLines(MultipartFile file) throws Exception {
+    private List<String> readLines(byte[] fileBytes) throws Exception {
         List<String> lines = new ArrayList<>();
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(file.getInputStream()))) {
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(new ByteArrayInputStream(fileBytes)))) {
             String line;
             boolean isHeader = true;
             while ((line = reader.readLine()) != null) {
-                if (isHeader) {
-                    isHeader = false;  // первая строка — заголовок CSV, пропускаем
-                    continue;
-                }
-                if (!line.isBlank()) {
-                    lines.add(line);   // добавляем только непустые строки
-                }
+                if (isHeader) { isHeader = false; continue; }
+                if (!line.isBlank()) lines.add(line);
             }
         }
         return lines;
@@ -92,15 +85,13 @@ public class FileProcessingService {
         try {
             String[] parts = line.split(",");
             if (parts.length < 3) return null;
-          return new UserRecord(parts[0].trim(), parts[1].trim(), parts[2].trim(), job);
+            return new UserRecord(parts[0].trim(), parts[1].trim(), parts[2].trim(), job);
         } catch (Exception e) {
             log.warn("Failed to parse line: {}", line);
             return null;
         }
     }
 
-    // делит большой список на маленькие части (батчи) по batchSize элементов
-    // например 100 строк с batchSize=10 → 10 батчей по 10 строк
     private List<List<String>> splitIntoBatches(List<String> lines, int batchSize) {
         List<List<String>> batches = new ArrayList<>();
         for (int i = 0; i < lines.size(); i += batchSize) {

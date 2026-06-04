@@ -30,7 +30,7 @@ public class JobTrackerService {
     // обновляет статус задачи на IN_PROGRESS когда начинается обработка
     @Transactional
     public void markInProgress(Long jobId) {
-        ProcessingJob job = findJobId(jobId);
+        ProcessingJob job = findJobById(jobId);
         job.setStatus(ProcessingJob.JobStatus.IN_PROGRESS);
         jobRepository.save(job);
         log.info("Job id={} marked as IN_PROGRESS", jobId);
@@ -40,7 +40,7 @@ public class JobTrackerService {
     // клиент будет опрашивать GET /status/{jobId} и видеть прогресс
     @Transactional
     public void updateProgress(Long jobId,int processedLines) {
-        ProcessingJob job = findJobId(jobId);
+        ProcessingJob job = findJobById(jobId);
         job.setProcessedLines(processedLines);
         jobRepository.save(job);
     }
@@ -48,7 +48,7 @@ public class JobTrackerService {
     // завершает задачу — ставит статус COMPLETED и время окончания
     @Transactional
     public void markComplete(Long jobId,int totalProccedLines) {
-        ProcessingJob job = findJobId(jobId);
+        ProcessingJob job = findJobById(jobId);
         job.setStatus(ProcessingJob.JobStatus.COMPLETED);
         job.setProcessedLines(totalProccedLines);
         job.setFinishedAt(LocalDateTime.now()); // фиксируем время завершения
@@ -59,14 +59,14 @@ public class JobTrackerService {
     // помечает задачу как провалившуюся если произошла ошибка
     @Transactional
     public void markFailed(Long jobId) {
-        ProcessingJob job = findJobId(jobId);
+        ProcessingJob job = findJobById(jobId);
         job.setStatus(ProcessingJob.JobStatus.FAILED);
         job.setFinishedAt(LocalDateTime.now());
         jobRepository.save(job);
         log.error("Job id={} FAILED", jobId);
     }
 
-    public ProcessingJob findJobId(Long jobId) {
+    public ProcessingJob findJobById(Long jobId) {
         return jobRepository.findById(jobId)
                 .orElseThrow(() -> new RuntimeException("Job not found:"+jobId));
     }
