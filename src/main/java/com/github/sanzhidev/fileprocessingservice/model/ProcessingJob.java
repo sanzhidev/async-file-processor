@@ -22,7 +22,7 @@ public class ProcessingJob {
     private int processedLines;
 
     private LocalDateTime createdAt;
-    private LocalDateTime finshedAt;
+    private LocalDateTime finishedAt;
 
     public enum JobStatus {
         PENDING,
