@@ -21,7 +21,7 @@ public class JobTrackerService {
     // @Transactional = все операции с БД внутри метода выполняются как одна транзакция
     @Transactional
     public ProcessingJob createJob(int totalLines) {
-        ProcessingJob job = new ProcessingJob();   // статус = PENDING, createdAt = now
+        ProcessingJob job = new ProcessingJob(totalLines);   // статус = PENDING, createdAt = now
         ProcessingJob saved = jobRepository.save(job); // сохраняем в БД, получаем id
         log.info("Created job with id {}", saved.getId(),totalLines);
         return saved;
@@ -70,7 +70,4 @@ public class JobTrackerService {
         return jobRepository.findById(jobId)
                 .orElseThrow(() -> new RuntimeException("Job not found:"+jobId));
     }
-
-
-
 }
